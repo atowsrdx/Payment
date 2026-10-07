@@ -3,5 +3,16 @@
   "payeeName": "",
   "upiId": "no@pament",
   "cardPaymentLink": "",
-  "cryptoOptions": []
+  "cryptoOptions": [],
+  "quickAmounts": [
+    100,
+    200,
+    300,
+    500,
+    1000,
+    5000
+  ],
+  "whatsapp": "",
+  "telegram": "",
+  "contactEmail": ""
 }
