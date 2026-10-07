@@ -85,6 +85,24 @@
     </div>
 
     <div class="card">
+      <h2>Quick amounts</h2>
+      <p class="help">Buttons shown above the UPI amount box. Up to 6 numbers, separated by commas. Leave empty for none.</p>
+      <label for="quickAmounts">Amounts in rupees</label>
+      <input id="quickAmounts" type="text" inputmode="decimal" autocomplete="off" placeholder="100, 500, 1000">
+    </div>
+
+    <div class="card">
+      <h2>Payment proof contacts</h2>
+      <p class="help">Customers send their transaction ID to you here after paying. These are shown to customers when they tap a send button. Fill in at least one, or leave all empty to hide the proof section.</p>
+      <label for="whatsapp">WhatsApp number (with country code)</label>
+      <input id="whatsapp" type="text" inputmode="tel" autocomplete="off" placeholder="919876543210">
+      <label for="telegram">Telegram username</label>
+      <input id="telegram" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="your_username">
+      <label for="contactEmail">Email</label>
+      <input id="contactEmail" type="text" inputmode="email" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="you@example.com">
+    </div>
+
+    <div class="card">
       <h2>Crypto</h2>
       <p class="help">Remove every row to turn crypto off.</p>
       <div id="cryptoList"></div>
@@ -242,6 +260,10 @@
     $('payeeName').value = cfg.payeeName || '';
     $('upiId').value = cfg.upiId || '';
     $('cardPaymentLink').value = cfg.cardPaymentLink || '';
+    $('quickAmounts').value = Array.isArray(cfg.quickAmounts) ? cfg.quickAmounts.join(', ') : '';
+    $('whatsapp').value = cfg.whatsapp || '';
+    $('telegram').value = cfg.telegram || '';
+    $('contactEmail').value = cfg.contactEmail || '';
     rows = (Array.isArray(cfg.cryptoOptions) ? cfg.cryptoOptions : []).map(function (c) {
       return { coin: String((c && c.coin) || ''), address: String((c && c.address) || '') };
     });
@@ -258,6 +280,23 @@
     if (upiId && !validUpi(upiId)) return { error: 'That UPI ID does not look right. Use the format name@bank.' };
     if (card && !validHttps(card)) return { error: 'The card payment link must start with https://' };
 
+    var amounts = [];
+    var rawAmounts = $('quickAmounts').value.split(/[,\s]+/).filter(Boolean);
+    for (var k = 0; k < rawAmounts.length; k++) {
+      var a = rawAmounts[k];
+      var n = /^\d+(\.\d{1,2})?$/.test(a) ? parseFloat(a) : NaN;
+      if (!(n >= 1 && n <= 100000)) return { error: 'Quick amounts must be numbers between 1 and 100000, separated by commas.' };
+      if (amounts.indexOf(n) === -1) amounts.push(n);
+    }
+    if (amounts.length > 6) return { error: 'Use at most 6 quick amounts.' };
+
+    var wa = $('whatsapp').value.replace(/[\s+\-()]/g, '');
+    if (wa && !/^\d{8,15}$/.test(wa)) return { error: 'WhatsApp number: use digits with the country code, for example 919876543210.' };
+    var tg = $('telegram').value.trim().replace(/^@/, '');
+    if (tg && !/^[A-Za-z0-9_]{5,32}$/.test(tg)) return { error: 'Telegram username must be 5 to 32 letters, numbers, or underscores.' };
+    var em = $('contactEmail').value.trim();
+    if (em && !(em.length <= 100 && /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/.test(em))) return { error: 'That email address does not look right.' };
+
     var crypto = [];
     for (var i = 0; i < rows.length; i++) {
       var coin = rows[i].coin.trim(), address = rows[i].address.trim();
@@ -265,7 +304,8 @@
       if (!coin || !address) return { error: 'Crypto row ' + (i + 1) + ' needs both a coin name and an address.' };
       crypto.push({ coin: coin, address: address });
     }
-    return { data: { siteName: siteName, payeeName: payeeName, upiId: upiId, cardPaymentLink: card, cryptoOptions: crypto } };
+    return { data: { siteName: siteName, payeeName: payeeName, upiId: upiId, cardPaymentLink: card, cryptoOptions: crypto,
+      quickAmounts: amounts, whatsapp: wa, telegram: tg, contactEmail: em } };
   }
 
   function showEditor() {
