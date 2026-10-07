@@ -1,7 +1,7 @@
 {
   "siteName": "Pay",
   "payeeName": "",
-  "upiId": "",
+  "upiId": "no@pament",
   "cardPaymentLink": "",
   "cryptoOptions": []
 }
