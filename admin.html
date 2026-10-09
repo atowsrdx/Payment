@@ -4,19 +4,31 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://api.github.com; img-src data:; base-uri 'none'; form-action 'none'">
 <title>Admin</title>
+<script>
+  // Never show this page inside another site's frame (clickjacking protection).
+  try { if (window.top !== window.self) document.documentElement.className = 'framed'; }
+  catch (e) { document.documentElement.className = 'framed'; }
+</script>
 <style>
   :root {
     --bg:#f4f5f7; --card:#fff; --text:#111; --muted:#667085; --line:#d5d9e2;
     --accent:#1f6feb; --accent-text:#fff; --chip:#e7e9ee; --danger:#b42318;
     --ok:#067647; --err:#b42318;
+    --warn-bg:#fff4e5; --warn-text:#7a4a00; --warn-line:#f5c26b;
+    --bad-bg:#fdecea; --bad-text:#7a1a12; --bad-line:#f3b4ae;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#0f1115; --card:#181b21; --text:#eef0f4; --muted:#98a2b3; --line:#2c313b;
-            --chip:#262b34; --ok:#47cd89; --err:#f97066; }
+            --chip:#262b34; --ok:#47cd89; --err:#f97066;
+            --warn-bg:#3a2a0c; --warn-text:#ffd98f; --warn-line:#6b4d12;
+            --bad-bg:#3b1612; --bad-text:#ffb4aa; --bad-line:#6e2a22; }
   }
   *, *::before, *::after { box-sizing:border-box; }
   html, body { margin:0; }
+  html.framed body { display:none !important; }
   body { font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text);
          min-height:100vh; padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px); }
   .wrap { max-width:520px; margin:0 auto; padding:20px; }
@@ -40,6 +52,12 @@
   .status.ok { color:var(--ok); } .status.err { color:var(--err); }
   .hidden { display:none !important; }
   a { color:var(--accent); }
+  .banner { border-radius:12px; padding:12px 14px; margin-bottom:16px; font-size:.9rem; line-height:1.5;
+            background:var(--warn-bg); color:var(--warn-text); border:1px solid var(--warn-line); }
+  .banner.bad { background:var(--bad-bg); color:var(--bad-text); border-color:var(--bad-line); }
+  .banner a { color:inherit; font-weight:600; }
+  .banner .actions { margin-top:8px; display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  .banner button { background:none; border:0; padding:0; color:inherit; font-weight:600; text-decoration:underline; font-size:.9rem; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -57,11 +75,42 @@
     <input id="repo" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
     <label for="branch">Branch (leave empty for the default branch)</label>
     <input id="branch" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="main">
+    <label for="expiry">Token expiry date (optional)</label>
+    <input id="expiry" type="date">
+    <p class="help">The date you chose when you created the token. It is used only to warn you before the token stops working.</p>
+    <label for="newPass">Create an admin passcode</label>
+    <input id="newPass" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+    <label for="newPass2">Confirm passcode</label>
+    <input id="newPass2" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+    <p class="help">At least 8 characters. The passcode locks this panel on this device and encrypts your token, so nobody who opens this page or this browser can use it. If you forget it, tap "Forget this device" and connect again with a new token.</p>
     <button id="connectBtn" class="full" type="button">Connect</button>
     <div id="connectStatus" class="status" aria-live="polite"></div>
   </div>
 
+  <div id="lockCard" class="card hidden">
+    <h2>Admin panel locked</h2>
+    <label for="unlockPass">Passcode</label>
+    <input id="unlockPass" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false">
+    <button id="unlockBtn" class="full" type="button">Unlock</button>
+    <div id="lockStatus" class="status" aria-live="polite"></div>
+    <button id="forgetBtn" class="alt full" type="button">Forget this device</button>
+  </div>
+
+  <div id="protectCard" class="card hidden">
+    <h2>Protect this device</h2>
+    <p class="help">Your GitHub token is saved on this device without a passcode. Create a passcode to lock the admin panel and encrypt the token.</p>
+    <label for="pPass">Create an admin passcode</label>
+    <input id="pPass" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+    <label for="pPass2">Confirm passcode</label>
+    <input id="pPass2" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+    <p class="help">At least 8 characters.</p>
+    <button id="protectBtn" class="full" type="button">Set passcode</button>
+    <div id="protectStatus" class="status" aria-live="polite"></div>
+    <button id="protectDisconnectBtn" class="alt full" type="button">Disconnect instead</button>
+  </div>
+
   <div id="editorCard" class="hidden">
+    <div id="expiryBanner" class="banner hidden" role="alert"></div>
     <div class="card">
       <h2>Website</h2>
       <label for="siteName">Website name</label>
@@ -109,51 +158,201 @@
       <button id="addCryptoBtn" class="alt full" type="button">Add crypto</button>
     </div>
 
+    <div class="card">
+      <h2>GitHub token</h2>
+      <p id="expiryNote" class="help"></p>
+      <label for="expiryEdit">Token expiry date</label>
+      <input id="expiryEdit" type="date">
+      <button id="expirySaveBtn" class="alt full" type="button">Save date</button>
+      <div id="expiryStatus" class="status" aria-live="polite"></div>
+    </div>
+
     <button id="saveBtn" class="full" type="button">Save changes</button>
     <div id="saveStatus" class="status" aria-live="polite"></div>
     <div class="row">
-      <button id="openBtn" class="alt" type="button">Open payment page</button>
+      <button id="openBtn" class="alt" type="button">Open page</button>
+      <button id="lockBtn" class="alt" type="button">Lock</button>
       <button id="disconnectBtn" class="alt" type="button">Disconnect</button>
     </div>
+    <p class="help">The panel locks by itself after 10 minutes without use. Unsaved changes are lost when it locks.</p>
   </div>
 </div>
 
 <script>
 (function () {
   'use strict';
+  if (document.documentElement.className === 'framed') return;
 
   var $ = function (id) { return document.getElementById(id); };
   var CONFIG_PATH = 'config.json';
-  var LS_KEY = 'payadmin.connection';
-  var conn = null;
-  var current = {};
-  var rows = [];
-  var busy = false;
+  var VAULT_KEY = 'payadmin.vault';
+  var LEGACY_KEY = 'payadmin.connection';
+  var FAIL_KEY = 'payadmin.fails';
+  var ITER = 600000;
+  var IDLE_MS = 10 * 60 * 1000;
+  var MIN_PASS = 8;
+
+  var conn = null, current = {}, rows = [], busy = false, detectedExpiry = null;
+  var vaultKey = null, vaultMeta = null, legacyConn = null, idleTimer = null, forgetTimer = null;
+  var te = new TextEncoder(), td = new TextDecoder();
 
   function validUpi(v) { return /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z0-9.-]{2,64}$/.test(v || ''); }
   function validHttps(v) { try { return new URL(v).protocol === 'https:'; } catch (e) { return false; } }
-
   function localErr(msg) { var e = new Error(msg); e.local = true; return e; }
 
-  function toB64(str) {
-    var bytes = new TextEncoder().encode(str), s = '';
-    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+  function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+  function bytesToB64(bytes) {
+    var u = new Uint8Array(bytes), s = '';
+    for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
     return btoa(s);
   }
-  function fromB64(b64) {
+  function b64ToBytes(b64) {
     var bin = atob(String(b64).replace(/\s/g, '')), arr = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    return new TextDecoder().decode(arr);
+    return arr;
+  }
+  function toB64(str) { return bytesToB64(te.encode(str)); }
+  function fromB64(b64) { return td.decode(b64ToBytes(b64)); }
+
+  /* ---------- encrypted storage of the connection (token etc.) ---------- */
+  function cryptoOk() { return !!(window.crypto && window.crypto.subtle); }
+
+  async function deriveKey(pass, salt, iter) {
+    var base = await crypto.subtle.importKey('raw', te.encode(pass), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: salt, iterations: iter, hash: 'SHA-256' },
+      base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  async function persistConn() {
+    if (!conn || !vaultKey || !vaultMeta) return;
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    var ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, vaultKey, te.encode(JSON.stringify(conn)));
+    lsSet(VAULT_KEY, JSON.stringify({ v: 1, iter: vaultMeta.iter, salt: vaultMeta.salt, iv: bytesToB64(iv), data: bytesToB64(ct) }));
+  }
+  async function createVault(pass) {
+    var salt = crypto.getRandomValues(new Uint8Array(16));
+    vaultKey = await deriveKey(pass, salt, ITER);
+    vaultMeta = { salt: bytesToB64(salt), iter: ITER };
+    await persistConn();
+  }
+  async function openVault(pass, v) {
+    var key = await deriveKey(pass, b64ToBytes(v.salt), v.iter);
+    var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(v.iv) }, key, b64ToBytes(v.data));
+    return { key: key, conn: JSON.parse(td.decode(pt)) };
+  }
+  function readVault() {
+    var s = lsGet(VAULT_KEY);
+    if (!s) return null;
+    try {
+      var v = JSON.parse(s);
+      if (v && v.salt && v.iv && v.data && v.iter >= 100000 && v.iter <= 5000000) return v;
+    } catch (e) {}
+    lsDel(VAULT_KEY);
+    return null;
+  }
+  function readLegacy() {
+    var s = lsGet(LEGACY_KEY);
+    if (!s) return null;
+    try {
+      var c = JSON.parse(s);
+      if (c && c.token && c.owner && c.repo) return c;
+    } catch (e) {}
+    lsDel(LEGACY_KEY);
+    return null;
+  }
+  function wipeAll() { lsDel(VAULT_KEY); lsDel(LEGACY_KEY); lsDel(FAIL_KEY); legacyConn = null; }
+
+  /* ---------- wrong-passcode throttle ---------- */
+  function failState() { try { return JSON.parse(lsGet(FAIL_KEY) || '{}') || {}; } catch (e) { return {}; } }
+  function lockoutSeconds() {
+    var f = failState();
+    return f.until && f.until > Date.now() ? Math.ceil((f.until - Date.now()) / 1000) : 0;
+  }
+  function registerFail() {
+    var n = (failState().n || 0) + 1, until = 0;
+    if (n >= 5) until = Date.now() + Math.min(300, 30 * Math.pow(2, n - 5)) * 1000;
+    lsSet(FAIL_KEY, JSON.stringify({ n: n, until: until }));
   }
 
-  var mem = null;
-  function loadConn() {
-    try { var s = localStorage.getItem(LS_KEY); if (s) return JSON.parse(s); } catch (e) {}
-    return mem;
+  function checkNewPass(a, b) {
+    if (!a) return 'Create a passcode.';
+    if (a.length < MIN_PASS) return 'The passcode must be at least ' + MIN_PASS + ' characters.';
+    if (a !== b) return 'The two passcodes do not match.';
+    return null;
   }
-  function saveConn(c) { mem = c; try { localStorage.setItem(LS_KEY, JSON.stringify(c)); } catch (e) {} }
-  function clearConn() { mem = null; try { localStorage.removeItem(LS_KEY); } catch (e) {} }
 
+  /* ---------- token expiry helpers ---------- */
+  function parseExpiry(str) {
+    var m = String(str || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*(UTC|GMT|Z|[+-]\d{2}:?\d{2})?$/i);
+    if (!m) return null;
+    var tz = (m[7] || 'UTC').toUpperCase(), off = 0;
+    if (/^[+-]/.test(tz)) {
+      var digits = tz.replace(/[^0-9]/g, '');
+      off = (tz.charAt(0) === '-' ? -1 : 1) * (parseInt(digits.slice(0, 2), 10) * 60 + parseInt(digits.slice(2, 4), 10));
+    }
+    var t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) - off * 60000;
+    return isFinite(t) ? t : null;
+  }
+  function dateInputToMs(v) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || '');
+    if (!m) return null;
+    var d = new Date(+m[1], +m[2] - 1, +m[3], 23, 59, 59);
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+  function msToDateInput(ms) {
+    var d = new Date(ms), p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function daysLeft(ms) {
+    var e = new Date(ms), n = new Date();
+    return Math.round((Date.UTC(e.getFullYear(), e.getMonth(), e.getDate()) - Date.UTC(n.getFullYear(), n.getMonth(), n.getDate())) / 86400000);
+  }
+  function prettyDate(ms) {
+    return new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function refreshExpiry() {
+    var banner = $('expiryBanner'), note = $('expiryNote');
+    banner.className = 'banner hidden';
+    banner.textContent = '';
+    var exp = conn && conn.expires;
+    if (!exp) {
+      $('expiryEdit').value = '';
+      note.textContent = 'Expiry date not set. Add the date you chose on GitHub to get a warning before the token stops working.';
+      return;
+    }
+    $('expiryEdit').value = msToDateInput(exp);
+    var when = prettyDate(exp), text = '', bad = false;
+    if (exp <= Date.now()) {
+      note.textContent = 'This token expired on ' + when + '.';
+      text = 'Your GitHub token expired on ' + when + '. Make a new token and reconnect to keep saving changes.';
+      bad = true;
+    } else {
+      var d = daysLeft(exp);
+      var left = d <= 0 ? 'today' : (d === 1 ? 'in 1 day' : 'in ' + d + ' days');
+      note.textContent = 'This token expires on ' + when + (d <= 0 ? ' (today).' : ' (' + d + (d === 1 ? ' day' : ' days') + ' left).');
+      if (d <= 7) text = 'Your GitHub token expires ' + left + ' (' + when + '). Make a new token and reconnect before then, or saving will stop.';
+    }
+    if (!text) return;
+    banner.className = 'banner' + (bad ? ' bad' : '');
+    var span = document.createElement('div');
+    span.textContent = text;
+    var actions = document.createElement('div');
+    actions.className = 'actions';
+    var a = document.createElement('a');
+    a.href = 'https://github.com/settings/personal-access-tokens/new';
+    a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.textContent = 'Make a new token';
+    var b = document.createElement('button');
+    b.type = 'button'; b.textContent = 'Reconnect';
+    b.addEventListener('click', disconnect);
+    actions.appendChild(a); actions.appendChild(b);
+    banner.appendChild(span); banner.appendChild(actions);
+  }
+
+  /* ---------- UI helpers ---------- */
   function say(id, msg, kind) {
     var el = $(id);
     el.textContent = msg || '';
@@ -163,7 +362,7 @@
   function explain(e) {
     if (e && e.local) return e.message;
     if (!e || !e.status) return 'Could not reach GitHub. Check your internet connection and try again.';
-    if (e.status === 401) return 'GitHub rejected the token. It may be wrong or expired.';
+    if (e.status === 401) return 'GitHub rejected the token. It may be wrong or expired. If it has expired, make a new token and connect again.';
     if (e.status === 403) return 'GitHub refused the request. Make sure the token has Contents: Read and write access to this repository. (' + e.message + ')';
     if (e.status === 404) return 'Repository not found, or the token cannot access it. Check the username, repository name, and token access.';
     if (e.status === 409 || e.status === 422) return 'The file changed on GitHub while saving. Try again.';
@@ -178,9 +377,14 @@
     };
     if (body) headers['Content-Type'] = 'application/json';
     return fetch('https://api.github.com' + path, {
-      method: method, headers: headers, cache: 'no-store',
+      method: method, headers: headers, cache: 'no-store', referrerPolicy: 'no-referrer',
       body: body ? JSON.stringify(body) : undefined
     }).then(function (r) {
+      try {
+        var hdr = r.headers.get('github-authentication-token-expiration');
+        var ts = hdr ? parseExpiry(hdr) : null;
+        if (ts) detectedExpiry = ts;
+      } catch (e) {}
       return r.text().then(function (t) {
         var j = null;
         try { j = t ? JSON.parse(t) : null; } catch (e) {}
@@ -222,11 +426,17 @@
     return out;
   }
 
+  var BUSY_BUTTONS = ['connectBtn', 'saveBtn', 'addCryptoBtn', 'disconnectBtn', 'unlockBtn', 'protectBtn', 'lockBtn', 'expirySaveBtn', 'forgetBtn', 'protectDisconnectBtn'];
   function setBusy(b) {
     busy = b;
-    ['connectBtn', 'saveBtn', 'addCryptoBtn', 'disconnectBtn'].forEach(function (id) { $(id).disabled = b; });
+    BUSY_BUTTONS.forEach(function (id) { $(id).disabled = b; });
   }
 
+  function showScreen(name) {
+    ['connect', 'lock', 'protect', 'editor'].forEach(function (n) { $(n + 'Card').classList.toggle('hidden', n !== name); });
+  }
+
+  /* ---------- editor form ---------- */
   function renderCrypto() {
     var list = $('cryptoList');
     list.textContent = '';
@@ -297,30 +507,72 @@
     var em = $('contactEmail').value.trim();
     if (em && !(em.length <= 100 && /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/.test(em))) return { error: 'That email address does not look right.' };
 
-    var crypto = [];
+    var coins = [];
     for (var i = 0; i < rows.length; i++) {
       var coin = rows[i].coin.trim(), address = rows[i].address.trim();
       if (!coin && !address) continue;
       if (!coin || !address) return { error: 'Crypto row ' + (i + 1) + ' needs both a coin name and an address.' };
-      crypto.push({ coin: coin, address: address });
+      coins.push({ coin: coin, address: address });
     }
-    return { data: { siteName: siteName, payeeName: payeeName, upiId: upiId, cardPaymentLink: card, cryptoOptions: crypto,
+    return { data: { siteName: siteName, payeeName: payeeName, upiId: upiId, cardPaymentLink: card, cryptoOptions: coins,
       quickAmounts: amounts, whatsapp: wa, telegram: tg, contactEmail: em } };
   }
 
+  /* ---------- locking ---------- */
+  function armIdle() {
+    clearTimeout(idleTimer);
+    if (!conn) return;
+    idleTimer = setTimeout(function () {
+      if (busy) { armIdle(); return; }
+      lockNow('Locked after 10 minutes without use.');
+    }, IDLE_MS);
+  }
+
+  function lockNow(msg) {
+    clearTimeout(idleTimer);
+    clearTimeout(forgetTimer);
+    $('forgetBtn').textContent = 'Forget this device';
+    conn = null; vaultKey = null; vaultMeta = null; current = {}; rows = []; detectedExpiry = null;
+    ['siteName', 'payeeName', 'upiId', 'cardPaymentLink', 'quickAmounts', 'whatsapp', 'telegram', 'contactEmail',
+     'expiryEdit', 'token', 'newPass', 'newPass2', 'unlockPass', 'pPass', 'pPass2'].forEach(function (id) { $(id).value = ''; });
+    $('cryptoList').textContent = '';
+    $('expiryBanner').textContent = '';
+    $('expiryBanner').className = 'banner hidden';
+    $('expiryNote').textContent = '';
+    say('saveStatus', ''); say('expiryStatus', ''); say('lockStatus', ''); say('connectStatus', ''); say('protectStatus', '');
+    if (readVault()) {
+      showScreen('lock');
+      say('lockStatus', msg || '');
+    } else {
+      showScreen('connect');
+      say('connectStatus', msg || '');
+    }
+  }
+
   function showEditor() {
-    $('connectCard').classList.add('hidden');
-    $('editorCard').classList.remove('hidden');
+    showScreen('editor');
     say('saveStatus', '');
+    say('expiryStatus', '');
     fillForm(current);
+    refreshExpiry();
+    armIdle();
   }
 
-  function showConnect() {
-    $('editorCard').classList.add('hidden');
-    $('connectCard').classList.remove('hidden');
-    say('connectStatus', '');
+  // conn must already be set. Loads settings from GitHub and opens the editor.
+  async function enterEditor() {
+    var f = await getFile(conn);
+    current = f ? f.json : {};
+    if (detectedExpiry && conn.expires !== detectedExpiry) { conn.expires = detectedExpiry; await persistConn(); }
+    showEditor();
+    if (!f) say('saveStatus', 'No ' + CONFIG_PATH + ' found yet. Saving will create it.', '');
   }
 
+  function rejectedMessage(c) {
+    if (c && c.expires && c.expires <= Date.now()) return 'Your GitHub token expired on ' + prettyDate(c.expires) + '. Make a new token and connect again.';
+    return null;
+  }
+
+  /* ---------- actions ---------- */
   async function connect() {
     if (busy) return;
     var c = {
@@ -331,26 +583,110 @@
     };
     if (!c.token || !c.owner || !c.repo) { say('connectStatus', 'Enter the token, username, and repository name.', 'err'); return; }
     if (!/^[\w.-]+$/.test(c.owner) || !/^[\w.-]+$/.test(c.repo)) { say('connectStatus', 'The username or repository name has characters GitHub does not allow.', 'err'); return; }
+    var passErr = checkNewPass($('newPass').value, $('newPass2').value);
+    if (passErr) { say('connectStatus', passErr, 'err'); return; }
+    if (!cryptoOk()) { say('connectStatus', 'This page must be opened over https to keep your token safe.', 'err'); return; }
+    var manual = null;
+    if ($('expiry').value) {
+      manual = dateInputToMs($('expiry').value);
+      if (manual === null) { say('connectStatus', 'That expiry date does not look right.', 'err'); return; }
+      if (manual <= Date.now()) { say('connectStatus', 'That expiry date has already passed. Make a new token first.', 'err'); return; }
+    }
+    detectedExpiry = null;
     setBusy(true);
     say('connectStatus', 'Connecting…');
     try {
       await api(c, 'GET', repoPath(c));
       var f = await getFile(c);
       current = f ? f.json : {};
+      c.expires = detectedExpiry || manual || null;
       conn = c;
-      saveConn(c);
-      $('token').value = '';
+      await createVault($('newPass').value);
+      $('token').value = ''; $('newPass').value = ''; $('newPass2').value = '';
       showEditor();
       if (!f) say('saveStatus', 'No ' + CONFIG_PATH + ' found yet. Saving will create it.', '');
     } catch (e) {
+      conn = null; vaultKey = null; vaultMeta = null;
       say('connectStatus', explain(e), 'err');
     } finally {
       setBusy(false);
     }
   }
 
-  async function save() {
+  async function unlock() {
     if (busy) return;
+    var wait = lockoutSeconds();
+    if (wait > 0) { say('lockStatus', 'Too many wrong attempts. Try again in ' + wait + ' seconds.', 'err'); return; }
+    var pass = $('unlockPass').value;
+    if (!pass) { say('lockStatus', 'Enter your passcode.', 'err'); return; }
+    if (!cryptoOk()) { say('lockStatus', 'This page must be opened over https.', 'err'); return; }
+    var v = readVault();
+    if (!v) { lockNow(''); return; }
+    setBusy(true);
+    say('lockStatus', 'Unlocking…');
+    try {
+      var opened;
+      try {
+        opened = await openVault(pass, v);
+      } catch (e) {
+        registerFail();
+        var w = lockoutSeconds();
+        say('lockStatus', w > 0 ? 'Too many wrong attempts. Try again in ' + w + ' seconds.' : 'Wrong passcode.', 'err');
+        return;
+      }
+      lsDel(FAIL_KEY);
+      vaultKey = opened.key;
+      vaultMeta = { salt: v.salt, iter: v.iter };
+      conn = opened.conn;
+      $('unlockPass').value = '';
+      detectedExpiry = null;
+      try {
+        await enterEditor();
+      } catch (e) {
+        if (e && e.status === 401) {
+          var msg = rejectedMessage(conn) || (explain(e) + ' Connect again to continue.');
+          wipeAll();
+          lockNow(msg);
+        } else {
+          lockNow(explain(e));
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function protect() {
+    if (busy || !legacyConn) return;
+    var passErr = checkNewPass($('pPass').value, $('pPass2').value);
+    if (passErr) { say('protectStatus', passErr, 'err'); return; }
+    if (!cryptoOk()) { say('protectStatus', 'This page must be opened over https to keep your token safe.', 'err'); return; }
+    setBusy(true);
+    say('protectStatus', 'Securing…');
+    try {
+      detectedExpiry = null;
+      conn = legacyConn;
+      var f = await getFile(conn);
+      current = f ? f.json : {};
+      if (detectedExpiry) conn.expires = detectedExpiry;
+      await createVault($('pPass').value);
+      lsDel(LEGACY_KEY);
+      legacyConn = null;
+      $('pPass').value = ''; $('pPass2').value = '';
+      showEditor();
+      if (!f) say('saveStatus', 'No ' + CONFIG_PATH + ' found yet. Saving will create it.', '');
+    } catch (e) {
+      var msg = e && e.status === 401 ? (rejectedMessage(conn) || (explain(e) + ' Connect again to continue.')) : null;
+      conn = null; vaultKey = null; vaultMeta = null;
+      if (msg) { wipeAll(); lockNow(msg); }
+      else say('protectStatus', explain(e), 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    if (busy || !conn) return;
     var res = readForm();
     if (res.error) { say('saveStatus', res.error, 'err'); return; }
     var body = Object.assign({}, current, res.data);
@@ -366,6 +702,7 @@
         try {
           await api(conn, 'PUT', repoPath(conn) + '/contents/' + CONFIG_PATH, payload);
           current = body;
+          if (detectedExpiry && conn.expires !== detectedExpiry) { conn.expires = detectedExpiry; persistConn().catch(function () {}); refreshExpiry(); }
           say('saveStatus', 'Saved. The live page updates in about a minute.', 'ok');
           return;
         } catch (e) {
@@ -381,43 +718,62 @@
   }
 
   function disconnect() {
-    clearConn();
-    conn = null;
-    current = {};
-    showConnect();
+    if (busy) return;
+    wipeAll();
+    $('expiry').value = '';
+    lockNow('');
   }
 
+  function forget() {
+    if (busy) return;
+    var btn = $('forgetBtn');
+    if (btn.dataset.armed !== '1') {
+      btn.dataset.armed = '1';
+      btn.textContent = 'Tap again to forget this device';
+      clearTimeout(forgetTimer);
+      forgetTimer = setTimeout(function () { btn.dataset.armed = ''; btn.textContent = 'Forget this device'; }, 5000);
+      return;
+    }
+    btn.dataset.armed = '';
+    wipeAll();
+    lockNow('This device was forgotten. Connect again with a new passcode.');
+  }
+
+  /* ---------- events ---------- */
   $('connectBtn').addEventListener('click', connect);
+  $('unlockBtn').addEventListener('click', unlock);
+  $('unlockPass').addEventListener('keydown', function (e) { if (e.key === 'Enter') unlock(); });
+  $('forgetBtn').addEventListener('click', forget);
+  $('protectBtn').addEventListener('click', protect);
+  $('protectDisconnectBtn').addEventListener('click', disconnect);
   $('saveBtn').addEventListener('click', save);
   $('addCryptoBtn').addEventListener('click', function () { rows.push({ coin: '', address: '' }); renderCrypto(); });
   $('disconnectBtn').addEventListener('click', disconnect);
+  $('lockBtn').addEventListener('click', function () { if (!busy) lockNow(''); });
   $('openBtn').addEventListener('click', function () { window.open('index.html', '_blank', 'noopener'); });
   $('token').addEventListener('keydown', function (e) { if (e.key === 'Enter') connect(); });
+  $('expirySaveBtn').addEventListener('click', function () {
+    if (!conn) return;
+    var v = $('expiryEdit').value;
+    if (!v) { conn.expires = null; persistConn().catch(function () {}); refreshExpiry(); say('expiryStatus', 'Date removed from this device.', 'ok'); return; }
+    var ms = dateInputToMs(v);
+    if (ms === null) { say('expiryStatus', 'That date does not look right.', 'err'); return; }
+    conn.expires = ms; persistConn().catch(function () {}); refreshExpiry();
+    say('expiryStatus', 'Date saved on this device.', 'ok');
+  });
+  ['click', 'keydown', 'touchstart', 'input'].forEach(function (ev) {
+    document.addEventListener(ev, function () { if (conn && !$('editorCard').classList.contains('hidden')) armIdle(); }, true);
+  });
 
-  (async function init() {
+  /* ---------- start ---------- */
+  (function init() {
     var guess = guessRepo();
     $('owner').value = guess.owner;
     $('repo').value = guess.repo;
-    var saved = loadConn();
-    if (saved && saved.token && saved.owner && saved.repo) {
-      $('owner').value = saved.owner;
-      $('repo').value = saved.repo;
-      $('branch').value = saved.branch || '';
-      setBusy(true);
-      say('connectStatus', 'Loading your settings…');
-      try {
-        var f = await getFile(saved);
-        current = f ? f.json : {};
-        conn = saved;
-        showEditor();
-        if (!f) say('saveStatus', 'No ' + CONFIG_PATH + ' found yet. Saving will create it.', '');
-      } catch (e) {
-        say('connectStatus', explain(e) + ' Connect again to continue.', 'err');
-        if (e && e.status === 401) clearConn();
-      } finally {
-        setBusy(false);
-      }
-    }
+    if (readVault()) { showScreen('lock'); return; }
+    var legacy = readLegacy();
+    if (legacy) { legacyConn = legacy; showScreen('protect'); return; }
+    showScreen('connect');
   })();
 })();
 </script>
